@@ -1,58 +1,90 @@
-import { Webhook } from "svix";
+import { json } from "express";
+
 import userModel from "../models/userModel.js";
 
-// Clerk webhook handler
+
+// api controller function to manage clerk user with database
+// https://localhost:4000/api/user/webhooks
+
+import { Webhook } from "svix"
+
+
 const clerkWebhook = async (req, res) => {
-  try {
-    const whook = new Webhook(process.env.CLERK_WEBHOOK_SECRET);
+    try{
+        const whook = new Webhook(process.env.CLERK_WEBHOOK_SECRET);
+        await whook.verify(JSON.stringify(req.body), {
+            "svix-id": req.headers["svix-id"],
+            "svix-timestamp": req.headers["svix-timestamp"],
+            "svix-signature": req.headers["svix-signature"]
+        });
 
-    // verify expects raw body, not parsed JSON
-    await whook.verify(JSON.stringify(req.body), {
-      "svix-id": req.headers["svix-id"],
-      "svix-timestamp": req.headers["svix-timestamp"],
-      "svix-signature": req.headers["svix-signature"],
-    });
+        const { data,type } = req.body;
 
-    const { data, type } = req.body;
+        switch(type) {
+            case "user.created":
+                {
+                    const userData = {
+                        clerkId: data.id,
+                        email: data.email_addresses[0].email_address,
+                        photo: data.image_url,
+                        firstName: data.first_name,
+                        lastName: data.last_name
+                    }
 
-    switch (type) {
-      case "user.created": {
-        const userData = {
-          clerkId: data.id,
-          email: data.email_addresses[0].email_address,
-          photo: data.image_url,
-          firstName: data.first_name,
-          lastName: data.last_name,
-        };
+                    await userModel.create(userData);
+                    res.json({});
+                    break;
+                }
 
-        await userModel.create(userData);
-        return res.json({ success: true });
-      }
+            case "user.updated":
+                {
+                    const userData = {
+                        email: data.email_addresses[0].email_address,
+                        photo: data.image_url,
+                        firstName: data.first_name,
+                        lastName: data.last_name
+                    }
+                    await userModel.findOneAndUpdate(({clerkId: data.id}), userData);
+                    res.json({});
 
-      case "user.updated": {
-        const userData = {
-          email: data.email_addresses[0].email_address,
-          photo: data.image_url,
-          firstName: data.first_name,
-          lastName: data.last_name,
-        };
+                    break;
+                }
+            case "user.deleted":
+                {
+                    await userModel.findOneAndDelete(({clerkId: data.id}));
+                    res.json({});
+                    break;
+                }
+                default:
+                {
+                   break;
+                }
+        }   
 
-        await userModel.findOneAndUpdate({ clerkId: data.id }, userData);
-        return res.json({ success: true });
-      }
+    } catch(error){
 
-      case "user.deleted": {
-        await userModel.findOneAndDelete({ clerkId: data.id });
-        return res.json({ success: true });
-      }
-
-      default:
-        return res.json({ success: true });
+        console.log(error.message);
+        res.json({success: false, message: error.message});
     }
-  } catch (error) {
-    console.error(error.message);
-    res.status(400).json({ success: false, message: error.message });
-  }
-};
+  
+}
 
-export { clerkWebhook };
+
+
+// api controller function to get user available credits
+
+const userCredits = async (req, res) => {
+    try {
+        const { clerkId } = req.body;
+        const userData = await userModel.findOne({ clerkId });
+        res.json({success: true, credits: userData.creditBalance});
+        
+    } catch (error) {
+        console.log(error.message);
+        res.json({success: false, message: error.message});
+        
+    }
+}
+
+export { clerkWebhook,userCredits };
+
